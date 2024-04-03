@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -37,7 +38,7 @@ namespace gubbuh.CPU
 
         }
 
-        public void PrintStatus()
+        public void PrintStatus(StreamWriter s)
         {
             line = "A: " + AF.high.read().ToString("X2") + " F: " + AF.low.read().ToString("X2") + " B: " +
                    BC.high.read().ToString("X2") + " C: " + BC.low.read().ToString("X2") + " D: " +
@@ -45,7 +46,8 @@ namespace gubbuh.CPU
                    HL.high.read().ToString("X2") + " L: " + HL.low.read().ToString("X2") + " SP: " +
                    SP.Read16().ToString("X4") + " PC: 00:" + PC.Read16().ToString("X4") + " (" +
                    mmu.Read(PC.Read16() + 0).ToString("X2") + " " + mmu.Read(PC.Read16() + 1).ToString("X2") + " " + mmu.Read(PC.Read16() + 2).ToString("X2") + " " + mmu.Read(PC.Read16() + 3).ToString("X2") + ")\n";
-            Console.Write(line);
+            //Console.Write(line);
+            s.Write(line);
         }
         
         private int r;
@@ -60,7 +62,8 @@ namespace gubbuh.CPU
             if (delayCycles > 0)
                 delayCycles--;
             if (delayCycles != 0)
-                return;
+                return; 
+            PrintStatus(Program.logFile);
 
             if (delayDi)
             {
@@ -123,7 +126,7 @@ namespace gubbuh.CPU
                     break;
                 
                 case 0x1a:
-                    AF.WriteHigh(mmu.Read(BC.Read16()));
+                    AF.WriteHigh(mmu.Read(DE.Read16()));
                     delayCycles += 2;
                     PC.inc();
                     break;
@@ -509,11 +512,24 @@ namespace gubbuh.CPU
                 
                 case 0xce:
                     ADC(mmu.Read(PC.Read16() + 1));
+                    PC.inc();
                     break;
                 
                 case 0x8e:
                     ADC(mmu.Read(HL.Read16()));
-                    PC.dec();
+                    break;
+                
+                case 0x98: case 0x99: case 0x9a: case 0x9b: case 0x9c: case 0x9d: case 0x9f:
+                    SBC(GetR8FromCode(opcode&0b00_000_111));
+                    break;
+                
+                case 0xde:
+                    SBC(mmu.Read(PC.Read16()+1));
+                    PC.inc();
+                    break;
+                
+                case 0x9e:
+                    SBC(mmu.Read((HL.Read16())));
                     break;
 
                 case 0xcb:
@@ -558,6 +574,7 @@ namespace gubbuh.CPU
                             RLC(HL.Read16());
                             break;
 
+                        
 
                         default:
                             Console.WriteLine("Unimplemented CB opcode " + opcode.ToString("x2") + " at " +
@@ -606,7 +623,30 @@ namespace gubbuh.CPU
             AF.setN(false);
             AF.WriteHigh((byte) (AF.ReadHigh() + u8 + c));
             AF.setZ(AF.ReadHigh() == 0);
-            PC.inc(2);
+            PC.inc();
+            delayCycles += 2;
+        }
+
+        public void SBC(Register8 r8)
+        {
+            byte c = (byte)(AF.getC() ? 1 : 0);
+            AF.setN(true); 
+            AF.setH((((AF.ReadHigh() & 0xf) - ((r8.read()+c) & 0xf)) & 0x10) == 0x10);
+            AF.setC((AF.ReadHigh() - (r8.read()+c)) < 0);
+            AF.setZ(AF.ReadHigh() == 0);
+            AF.WriteHigh((byte) (AF.ReadHigh() - r8.read()));
+            PC.inc();
+            delayCycles += 1;
+        }
+        public void SBC(byte u8)
+        {
+            byte c = (byte)(AF.getC() ? 1 : 0);
+            AF.setN(true); 
+            AF.setH((((AF.ReadHigh() & 0xf) - ((u8+c) & 0xf)) & 0x10) == 0x10);
+            AF.setC((AF.ReadHigh() - (u8+c)) < 0);
+            AF.setZ(AF.ReadHigh() == 0);
+            AF.WriteHigh((byte) (AF.ReadHigh() - u8));
+            PC.inc();
             delayCycles += 2;
         }
         
@@ -858,9 +898,9 @@ namespace gubbuh.CPU
         {
             AF.WriteHigh((byte) (AF.ReadHigh() & r8.read()));
             AF.setZ(AF.ReadHigh() == 0);
-            AF.setH(false);
-            AF.setC(true);
             AF.setN(false);
+            AF.setH(true);
+            AF.setC(false);
             PC.inc();
             delayCycles += 1;
         }
@@ -880,12 +920,10 @@ namespace gubbuh.CPU
 
         public void LD_u16_A()
         {
-            
             a = mmu.Read(PC.Read16() + 1) | (mmu.Read(PC.Read16() + 2) << 0x8);
             mmu.Write(a, AF.ReadHigh());
             delayCycles += 4;
             PC.inc(3);
-           
         }
 
         public void RET()
@@ -970,8 +1008,8 @@ namespace gubbuh.CPU
         {
             AF.WriteHigh((byte) (AF.ReadHigh() & b));
             AF.setZ(AF.ReadHigh() == 0);
-            AF.setH(false);
-            AF.setC(true);
+            AF.setH(true);
+            AF.setC(false);
             AF.setN(false);
             PC.inc();
             delayCycles += 2;
@@ -993,8 +1031,8 @@ namespace gubbuh.CPU
         public void LD_A_u16()
         {
             a = mmu.Read(PC.Read16() + 1) | (mmu.Read(PC.Read16() + 2) << 8);
-            
-            mmu.Write(a, AF.ReadHigh());
+            //mmu.Write(a, AF.ReadHigh());
+            AF.WriteHigh(mmu.Read(a));
             delayCycles += 4;
             PC.inc(3);
         }   
